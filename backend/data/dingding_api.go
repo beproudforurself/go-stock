@@ -1,7 +1,9 @@
 package data
 
 import (
+	"encoding/json"
 	"go-stock/backend/logger"
+	"strings"
 
 	"github.com/duke-git/lancet/v2/strutil"
 	"github.com/go-resty/resty/v2"
@@ -27,10 +29,11 @@ func (DingDingAPI) SendDingDingMessage(message string) string {
 		//logger.SugaredLogger.Info("钉钉推送未开启")
 		return "钉钉推送未开启"
 	}
+	body := normalizeDingDingMessageBody(message)
 	// 发送钉钉消息
 	resp, err := SharedHTTPClient.R().
 		SetHeader("Content-Type", "application/json").
-		SetBody(message).
+		SetBody(body).
 		Post(getApiURL())
 	if err != nil {
 		logger.SugaredLogger.Error(err.Error())
@@ -40,12 +43,33 @@ func (DingDingAPI) SendDingDingMessage(message string) string {
 	return "发送钉钉消息成功"
 }
 
-func getApiURL() string {
-	return GetSettingConfig().DingRobot
+func normalizeDingDingMessageBody(message string) any {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(message)), &payload); err == nil {
+		if _, ok := payload["msgtype"]; ok {
+			return payload
+		}
+	}
+
+	message = normalizeDingDingMarkdownText(message)
+	if message == "" {
+		message = "go-stock 通知"
+	}
+
+	return &Message{
+		Msgtype: "markdown",
+		Markdown: Markdown{
+			Title: "go-stock 通知",
+			Text:  message,
+		},
+		At: At{
+			IsAtAll: true,
+		},
+	}
 }
 
-func (DingDingAPI) SendToDingDing(title, message string) string {
-	message = strutil.ReplaceWithMap(message, map[string]string{
+func normalizeDingDingMarkdownText(message string) string {
+	return strutil.ReplaceWithMap(message, map[string]string{
 		"\\n":   "\n",
 		"\\r":   "\r",
 		"\\t":   "\t",
@@ -53,6 +77,14 @@ func (DingDingAPI) SendToDingDing(title, message string) string {
 		"\\\\r": "\r",
 		"\\\\t": "\t",
 	})
+}
+
+func getApiURL() string {
+	return GetSettingConfig().DingRobot
+}
+
+func (DingDingAPI) SendToDingDing(title, message string) string {
+	message = normalizeDingDingMarkdownText(message)
 	// 发送钉钉消息
 	resp, err := SharedHTTPClient.R().
 		SetHeader("Content-Type", "application/json").

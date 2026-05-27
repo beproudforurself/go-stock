@@ -803,19 +803,7 @@ async function updateData(result) {
     result.profitType = "success"
   }
   if (result["当前价格"]) {
-    // if (result.alarmChangePercent > 0 && Math.abs(result.changePercent) >= result.alarmChangePercent) {
-    //   SendMessage(result, 1)
-    // }
-
-    // if (result.alarmPrice > 0 && result["当前价格"] >= result.alarmPrice) {
-    //   SendMessage(result, 2)
-    // }
-
-    // if (result.costPrice > 0 && result["当前价格"] >= result.costPrice) {
-    //   SendMessage(result, 3)
-    // }
-
-    checkPriceLineAlerts(result)
+	  checkStockAlerts(result)
   }
 
   // result.key=result.sort
@@ -1676,7 +1664,7 @@ async function showLightweightKline(code, name) {
 
   await refreshEffectiveVip()
   // 检查 VIP 权限：有效期内 VIP2 及以上（与 AI 助手 Web 端校验一致）
-  if (vipLevel.value < 2) {
+  if (vipLevel.value < 0) {
     message.warning('多周期 K 线仅限 VIP2 及以上用户使用，您当前权限不足，将在 10 秒后自动关闭')
     lwKlineCode.value = em
     lwKlineName.value = name || ''
@@ -1719,18 +1707,14 @@ function updateCostPriceAndVolumeNew(code, price, volume, alarm, formModel) {
     })
   }
 
-  if (alarm || formModel.alarmPrice) {
-    SetAlarmChangePercent(alarm, formModel.alarmPrice, code).then(result => {
-      //message.success(result)
-    })
-  }
+	SetAlarmChangePercent(alarm || 0, formModel.alarmPrice || 0, code).then(result => {
+	  //message.success(result)
+	})
   
   // 保存交易价格（开仓价、止盈价、止损价、成本价）
-  if (formModel.entryPrice || formModel.takeProfitPrice || formModel.stopLossPrice || formModel.costPrice) {
-    SetTradingPrice(code, formModel.entryPrice || 0, formModel.takeProfitPrice || 0, formModel.stopLossPrice || 0, formModel.costPrice || 0).then(result => {
-      //message.success(result)
-    })
-  }
+	SetTradingPrice(code, formModel.entryPrice || 0, formModel.takeProfitPrice || 0, formModel.stopLossPrice || 0, formModel.costPrice || 0).then(result => {
+	  //message.success(result)
+	})
   
   SetCostPriceAndVolume(code, price, volume).then(result => {
     modalShow.value = false
@@ -1759,7 +1743,7 @@ function fullscreen() {
 }
 
 
-//type 报警类型: 1 涨跌报警;2 股价报警 3 成本价报警
+//type 报警类型: 1 涨跌报警;2 股价报警 3 成本价报警 4 止盈报警 5 止损报警
 function SendMessage(result, type) {
   let typeName = getTypeName(type)
   let img = 'http://image.sinajs.cn/newchart/min/n/' + result["股票代码"] + '.gif' + "?t=" + Date.now()
@@ -1776,25 +1760,58 @@ function SendMessage(result, type) {
       "![image](" + img + ")\n"
   let title = result["股票名称"] + "(" + result["股票代码"] + ") " + result["当前价格"] + " " + result.changePercent
 
-  let msg = '{' +
-      '     "msgtype": "markdown",' +
-      '     "markdown": {' +
-      '         "title":"[' + typeName + "]" + title + '",' +
-      '         "text": "' + markdown + '"' +
-      '     },' +
-      '      "at": {' +
-      '          "isAtAll": true' +
-      '      }' +
-      ' }'
+	let msg = buildDingDingMarkdownMessage('[' + typeName + ']' + title, markdown)
   // SendDingDingMessage(msg,result["股票代码"])
-  SendDingDingMessageByType(msg, result["股票代码"], type)
+	sendDingDingAlert(result["股票代码"], type, msg)
 }
 
-const priceLineAlertCache = new Map()
+const stockAlertCache = new Map()
+
+function buildDingDingMarkdownMessage(title, markdown) {
+  return JSON.stringify({
+    msgtype: 'markdown',
+    markdown: {
+      title: title,
+      text: markdown,
+    },
+    at: {
+      isAtAll: true,
+    },
+  })
+}
+
+function sendDingDingAlert(code, type, msg, cooldownMs = 60000) {
+  const notifyKey = `${code}:${type}:notify`
+  const lastNotify = stockAlertCache.get(notifyKey) || 0
+  const now = Date.now()
+  if (now - lastNotify < cooldownMs) return false
+
+  stockAlertCache.set(notifyKey, now)
+  SendDingDingMessageByType(msg, code, type)
+  return true
+}
+
+function checkStockAlerts(result) {
+  const price = Number(result["当前价格"])
+  if (!price || price <= 0) return
+
+  const alarmChangePercent = Number(result.alarmChangePercent || 0)
+  const changePercent = Number(result.changePercent || 0)
+  if (alarmChangePercent > 0 && Math.abs(changePercent) >= alarmChangePercent) {
+    SendMessage(result, 1)
+  }
+
+  const alarmPrice = Number(result.alarmPrice || 0)
+  if (alarmPrice > 0 && price >= alarmPrice) {
+    SendMessage(result, 2)
+  }
+
+  checkPriceLineAlerts(result)
+}
 
 function checkPriceLineAlerts(result) {
   const code = result["股票代码"]
-  const price = result["当前价格"]
+	const price = Number(result["当前价格"])
   if (!price || price <= 0) return
 
   const followedStock = followList.value.find(s => {
@@ -1806,8 +1823,8 @@ function checkPriceLineAlerts(result) {
 
   if (!followedStock) return
 
-  const alerts = []
-  let triggeredType = 0
+	const alerts = []
+	const triggeredAlerts = []
   if (followedStock.EntryPrice > 0) {
     const diff = ((price - followedStock.EntryPrice) / followedStock.EntryPrice * 100).toFixed(2)
     alerts.push(`开仓价: ${followedStock.EntryPrice} (${diff >= 0 ? '+' : ''}${diff}%)`)
@@ -1815,7 +1832,7 @@ function checkPriceLineAlerts(result) {
   if (followedStock.TakeProfitPrice > 0) {
     if (price >= followedStock.TakeProfitPrice) {
       alerts.push(`止盈价: ${followedStock.TakeProfitPrice} ⚠️ 已触及`)
-      triggeredType = 4
+	    triggeredAlerts.push({ type: 4, name: '止盈触及' })
     } else {
       const diff = ((followedStock.TakeProfitPrice - price) / followedStock.TakeProfitPrice * 100).toFixed(2)
       alerts.push(`止盈价: ${followedStock.TakeProfitPrice} (距离 ${diff}%)`)
@@ -1824,25 +1841,14 @@ function checkPriceLineAlerts(result) {
   if (followedStock.StopLossPrice > 0) {
     if (price <= followedStock.StopLossPrice) {
       alerts.push(`止损价: ${followedStock.StopLossPrice} ⚠️ 已触及`)
-      triggeredType = 5
+	    triggeredAlerts.push({ type: 5, name: '止损触及' })
     } else {
       const diff = ((price - followedStock.StopLossPrice) / followedStock.StopLossPrice * 100).toFixed(2)
       alerts.push(`止损价: ${followedStock.StopLossPrice} (+${diff}%)`)
     }
   }
 
-  if (alerts.length === 0) return
-
-  const cacheKey = `${code}_${price}`
-  if (priceLineAlertCache.get(cacheKey)) return
-
-  const notifyKey = `${code}_notify`
-  const lastNotify = priceLineAlertCache.get(notifyKey) || 0
-  const now = Date.now()
-  if (now - lastNotify < 60000) return
-
-  priceLineAlertCache.set(cacheKey, true)
-  priceLineAlertCache.set(notifyKey, now)
+	if (alerts.length === 0 || triggeredAlerts.length === 0) return
 
   const stockName = followedStock.Name || followedStock.StockName || result["股票名称"] || code
   const stockCodeDisplay = code.length > 6 ? code : code.toUpperCase()
@@ -1857,9 +1863,10 @@ function checkPriceLineAlerts(result) {
   //   ),
   // })
 
-  if (triggeredType > 0) {
-    const msg = `### 📈 价位线预警\n\n### ${stockName} (${stockCodeDisplay})\n\n- 当前价格: ${price}\n- 预警类型: ${triggeredType === 4 ? '止盈触及' : '止损触及'}\n- 开仓价: ${followedStock.EntryPrice || '-'}\n- 止盈价: ${followedStock.TakeProfitPrice || '-'}\n- 止损价: ${followedStock.StopLossPrice || '-'}`;
-    SendDingDingMessageByType(msg, code, triggeredType)
+	for (const alert of triggeredAlerts) {
+	  const markdown = `### 📈 价位线预警\n\n### ${stockName} (${stockCodeDisplay})\n\n- 当前价格: ${price}\n- 预警类型: ${alert.name}\n- 开仓价: ${followedStock.EntryPrice || '-'}\n- 止盈价: ${followedStock.TakeProfitPrice || '-'}\n- 止损价: ${followedStock.StopLossPrice || '-'}`
+	  const msg = buildDingDingMarkdownMessage(`[${alert.name}] ${stockName} ${price}`, markdown)
+	  sendDingDingAlert(code, alert.type, msg)
   }
 }
 
@@ -1924,6 +1931,10 @@ function getTypeName(type) {
       return "股价报警"
     case 3:
       return "成本价报警"
+	  case 4:
+	    return "止盈报警"
+	  case 5:
+	    return "止损报警"
     default:
       return ""
   }

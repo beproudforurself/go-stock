@@ -103,9 +103,9 @@ func (a *App) GetMachineId() string {
 func (a *App) CheckDeviceBinding(token string, apiBase string) map[string]any {
 	uuid := machineid.GetMachineId()
 	result := map[string]any{
-		"bound":      false,
+		"bound":       false,
 		"deviceCount": 0,
-		"maxDevices": 5,
+		"maxDevices":  5,
 	}
 
 	if token == "" || apiBase == "" {
@@ -123,9 +123,9 @@ func (a *App) CheckDeviceBinding(token string, apiBase string) map[string]any {
 	var respData struct {
 		Code int `json:"code"`
 		Data struct {
-			Bound      bool `json:"bound"`
-			DeviceCount int `json:"deviceCount"`
-			MaxDevices  int `json:"maxDevices"`
+			Bound       bool `json:"bound"`
+			DeviceCount int  `json:"deviceCount"`
+			MaxDevices  int  `json:"maxDevices"`
 		} `json:"data"`
 	}
 	if err := json.Unmarshal(resp.Body(), &respData); err != nil {
@@ -1675,11 +1675,12 @@ func (a *App) SendDingDingMessageByType(message string, stockCode string, msgTyp
 		return "非美股交易时间"
 	}
 
-	ttl, _ := a.cache.TTL([]byte(stockCode))
+	alertCacheKey := fmt.Sprintf("%s:%d", stockCode, msgType)
+	ttl, _ := a.cache.TTL([]byte(alertCacheKey))
 	if ttl > 0 {
 		return ""
 	}
-	err := a.cache.Set([]byte(stockCode), []byte("1"), getMsgTypeTTL(msgType))
+	err := a.cache.Set([]byte(alertCacheKey), []byte("1"), getMsgTypeTTL(msgType))
 	if err != nil {
 		logger.SugaredLogger.Errorf("set cache error:%s", err.Error())
 		return ""
